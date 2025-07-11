@@ -1,7 +1,10 @@
-﻿using System.Windows.Forms;
+﻿using System;
+using System.Collections.Generic;
+using System.IO;
+using System.Linq;
+using System.Windows.Forms;
 
-namespace MigrationTool;
-class Program
+namespace MigrationTool
 {
     public class MigrationOption
     {
@@ -19,152 +22,182 @@ class Program
         }
     }
 
-    [STAThread]
-    static void Main(string[] args)
+    class Program
     {
-        Console.WriteLine("=== Xenia Manager Migration Tool ===\n");
-        try
+        private const string MIGRATION_ALL_TYPE = "all";
+        private const string EXIT_OPTION_TEXT = "Exit";
+        private const string EMULATORS_FOLDER = "Emulators";
+        private const string CONTENT_FOLDER = "content";
+
+        [STAThread]
+        static void Main(string[] args)
         {
-            // Get old and new Xenia Manager paths
-            var (oldXeniaManagerPath, oldXeniaManagerConfigPath) = GetXeniaManagerPath("old");
-            var (newXeniaManagerPath, newXeniaManagerConfigPath) = GetXeniaManagerPath("new");
+            Console.WriteLine("=== Xenia Manager Migration Tool ===\n");
 
-            // Load configurations
-            Console.WriteLine("Loading configurations...");
-            var oldConfigJson = File.ReadAllText(oldXeniaManagerConfigPath);
-            var newConfigJson = File.ReadAllText(newXeniaManagerConfigPath);
-
-            var oldConfigStatus = SettingsParser.GetEmulatorStatus(oldConfigJson, false);
-            var oldConfig = SettingsParser.ParseOldConfig(oldConfigJson, oldXeniaManagerPath);
-            var newConfigStatus = SettingsParser.GetEmulatorStatus(newConfigJson, true);
-            var newConfig = SettingsParser.ParseNewConfig(newConfigJson, newXeniaManagerPath);
-
-            // Display current status
-            DisplayConfigurationStatus(oldConfigStatus, newConfigStatus);
-
-            // Show migration options
-            ShowMigrationMenu(oldConfig, newConfig, oldXeniaManagerPath, newXeniaManagerPath);
-        }
-        catch (Exception ex)
-        {
-            Console.WriteLine($"Error: {ex.Message}");
-            Console.WriteLine("Press any key to exit...");
-            Console.ReadKey();
-        }
-    }
-
-    private static (string path, string configPath) GetXeniaManagerPath(string type)
-    {
-        Console.WriteLine($"Please select the {type} Xenia Manager executable...");
-
-        OpenFileDialog openFileDialog = new()
-        {
-            Title = $"Select {type} Xenia Manager executable",
-            Filter = "Executable files (*.exe)|*.exe|All files (*.*)|*.*"
-        };
-
-        string xeniaManagerPath = string.Empty;
-        string xeniaManagerConfigPath = string.Empty;
-
-        while (string.IsNullOrEmpty(xeniaManagerPath) || string.IsNullOrEmpty(xeniaManagerConfigPath))
-        {
-            if (openFileDialog.ShowDialog() == DialogResult.OK)
+            try
             {
-                var selectedPath = Path.GetDirectoryName(openFileDialog.FileName);
+                var pathInfo = GetManagerPaths();
+                var configData = LoadConfigurations(pathInfo);
 
-                if (Directory.Exists(selectedPath))
+                DisplayConfigurationStatus(configData.OldStatus, configData.NewStatus);
+                ShowMigrationMenu(configData, pathInfo);
+            }
+            catch (Exception ex)
+            {
+                Console.WriteLine($"Error: {ex.Message}");
+                Console.WriteLine("Press any key to exit...");
+                Console.ReadKey();
+            }
+        }
+
+        private static (string OldPath, string OldConfigPath, string NewPath, string NewConfigPath) GetManagerPaths()
+        {
+            var (oldPath, oldConfigPath) = GetXeniaManagerPath("old");
+            var (newPath, newConfigPath) = GetXeniaManagerPath("new");
+            return (oldPath, oldConfigPath, newPath, newConfigPath);
+        }
+
+        private static (EmulatorStatus OldStatus, EmulatorStatus NewStatus, OldManagerConfig OldConfig, NewManagerConfig NewConfig) LoadConfigurations((string OldPath, string OldConfigPath, string NewPath, string NewConfigPath) pathInfo)
+        {
+            Console.WriteLine("Loading configurations...");
+
+            var oldConfigJson = File.ReadAllText(pathInfo.OldConfigPath);
+            var newConfigJson = File.ReadAllText(pathInfo.NewConfigPath);
+
+            var oldStatus = SettingsParser.GetEmulatorStatus(oldConfigJson, false);
+            var oldConfig = SettingsParser.ParseOldConfig(oldConfigJson, pathInfo.OldPath);
+            var newStatus = SettingsParser.GetEmulatorStatus(newConfigJson, true);
+            var newConfig = SettingsParser.ParseNewConfig(newConfigJson, pathInfo.NewPath);
+
+            return (oldStatus, newStatus, oldConfig, newConfig);
+        }
+
+        private static (string path, string configPath) GetXeniaManagerPath(string type)
+        {
+            Console.WriteLine($"Please select the {type} Xenia Manager executable...");
+
+            var openFileDialog = new OpenFileDialog
+            {
+                Title = $"Select {type} Xenia Manager executable",
+                Filter = "Executable files (*.exe)|*.exe|All files (*.*)|*.*"
+            };
+
+            while (true)
+            {
+                if (openFileDialog.ShowDialog() != DialogResult.OK)
                 {
-                    xeniaManagerPath = selectedPath;
-                    Console.WriteLine($"{type} Xenia Manager Path: {xeniaManagerPath}");
+                    Console.WriteLine("No file selected. Exiting...");
+                    Environment.Exit(0);
                 }
-                else
+
+                var selectedPath = Path.GetDirectoryName(openFileDialog.FileName);
+                if (!Directory.Exists(selectedPath))
                 {
                     Console.WriteLine($"Invalid {type} Xenia Manager Path");
                     continue;
                 }
 
-                var configPath = Path.Combine(xeniaManagerPath, "Config", "config.json");
-                if (File.Exists(configPath))
-                {
-                    xeniaManagerConfigPath = configPath;
-                    Console.WriteLine($"{type} Config found: {xeniaManagerConfigPath}");
-                }
-                else
+                var configPath = Path.Combine(selectedPath, "Config", "config.json");
+                if (!File.Exists(configPath))
                 {
                     Console.WriteLine($"Config file not found in {type} Xenia Manager Path");
-                    xeniaManagerPath = string.Empty; // Reset to continue loop
+                    continue;
                 }
-            }
-            else
-            {
-                Console.WriteLine("No file selected. Exiting...");
-                Environment.Exit(0);
+
+                Console.WriteLine($"{type} Xenia Manager Path: {selectedPath}");
+                Console.WriteLine($"{type} Config found: {configPath}");
+                return (selectedPath, configPath);
             }
         }
 
-        return (xeniaManagerPath, xeniaManagerConfigPath);
-    }
-
-    private static void DisplayConfigurationStatus(EmulatorStatus oldStatus, EmulatorStatus newStatus)
-    {
-        Console.WriteLine("\n=== Configuration Status ===");
-        Console.WriteLine("OLD CONFIGURATION:");
-        Console.WriteLine($"  Xenia Canary: {(oldStatus.XeniaCanaryConfigured ? "✓ Configured" : "✗ Not configured")}");
-        Console.WriteLine($"  Xenia Mousehook: {(oldStatus.XeniaMousehookConfigured ? "✓ Configured" : "✗ Not configured")}");
-        Console.WriteLine($"  Xenia Netplay: {(oldStatus.XeniaNetplayConfigured ? "✓ Configured" : "✗ Not configured")}");
-        Console.WriteLine($"  Total configured: {oldStatus.ConfiguredEmulatorCount}");
-
-        Console.WriteLine("\nNEW CONFIGURATION:");
-        Console.WriteLine($"  Xenia Canary: {(newStatus.XeniaCanaryConfigured ? "✓ Configured" : "✗ Not configured")}");
-        Console.WriteLine($"  Xenia Mousehook: {(newStatus.XeniaMousehookConfigured ? "✓ Configured" : "✗ Not configured")}");
-        Console.WriteLine($"  Xenia Netplay: {(newStatus.XeniaNetplayConfigured ? "✓ Configured" : "✗ Not configured")}");
-        Console.WriteLine($"  Total configured: {newStatus.ConfiguredEmulatorCount}");
-    }
-
-    private static void ShowMigrationMenu(OldManagerConfig oldConfig, NewManagerConfig newConfig,
-                                        string oldPath, string newPath)
-    {
-        if (!HasAnyEmulatorToMigrate(oldConfig))
+        private static void DisplayConfigurationStatus(EmulatorStatus oldStatus, EmulatorStatus newStatus)
         {
-            Console.WriteLine("\n⚠️  No emulators found in old configuration to migrate.");
-            Console.WriteLine("Press any key to exit...");
-            Console.ReadKey();
-            return;
+            Console.WriteLine("\n=== Configuration Status ===");
+
+            DisplayEmulatorStatus("OLD CONFIGURATION", oldStatus);
+            DisplayEmulatorStatus("NEW CONFIGURATION", newStatus);
         }
 
-        while (true)
+        private static void DisplayEmulatorStatus(string title, EmulatorStatus status)
+        {
+            Console.WriteLine($"{title}:");
+            Console.WriteLine($"  Xenia Canary: {GetStatusIcon(status.XeniaCanaryConfigured)}");
+            Console.WriteLine($"  Xenia Mousehook: {GetStatusIcon(status.XeniaMousehookConfigured)}");
+            Console.WriteLine($"  Xenia Netplay: {GetStatusIcon(status.XeniaNetplayConfigured)}");
+            Console.WriteLine($"  Total configured: {status.ConfiguredEmulatorCount}");
+            Console.WriteLine();
+        }
+
+        private static string GetStatusIcon(bool configured) => configured ? "✓ Configured" : "✗ Not configured";
+
+        private static void ShowMigrationMenu((EmulatorStatus OldStatus, EmulatorStatus NewStatus, OldManagerConfig OldConfig, NewManagerConfig NewConfig) configData, (string OldPath, string OldConfigPath, string NewPath, string NewConfigPath) pathInfo)
+        {
+            if (!HasAnyEmulatorToMigrate(configData.OldConfig))
+            {
+                Console.WriteLine("\n⚠️  No emulators found in old configuration to migrate.");
+                Console.WriteLine("Press any key to exit...");
+                Console.ReadKey();
+                return;
+            }
+
+            while (true)
+            {
+                var availableOptions = GetAvailableMigrationOptions(configData.OldConfig);
+                DisplayMigrationOptions(availableOptions);
+
+                var choice = GetUserChoice(availableOptions.Count + 1);
+                if (choice == availableOptions.Count + 1) // Exit option
+                {
+                    Console.WriteLine("Exiting...");
+                    break;
+                }
+
+                var selectedOption = availableOptions.FirstOrDefault(o => o.Number == choice);
+                if (selectedOption == null)
+                {
+                    Console.WriteLine("Invalid choice. Please try again.");
+                    continue;
+                }
+
+                ProcessMigrationChoice(selectedOption, availableOptions, pathInfo.OldPath, pathInfo.NewPath);
+            }
+        }
+
+        private static List<MigrationOption> GetAvailableMigrationOptions(OldManagerConfig oldConfig)
+        {
+            var options = new List<MigrationOption>();
+            int optionNumber = 1;
+
+            if (HasValidEmulatorPath(oldConfig.XeniaCanary))
+            {
+                options.Add(new MigrationOption(optionNumber++, "Xenia Canary", "canary", oldConfig.XeniaCanary));
+            }
+
+            if (HasValidEmulatorPath(oldConfig.XeniaMousehook))
+            {
+                options.Add(new MigrationOption(optionNumber++, "Xenia Mousehook", "mousehook", oldConfig.XeniaMousehook));
+            }
+
+            if (HasValidEmulatorPath(oldConfig.XeniaNetplay))
+            {
+                options.Add(new MigrationOption(optionNumber++, "Xenia Netplay", "netplay", oldConfig.XeniaNetplay));
+            }
+
+            if (options.Count > 1)
+            {
+                options.Add(new MigrationOption(optionNumber, "Migrate All", MIGRATION_ALL_TYPE, null));
+            }
+
+            return options;
+        }
+
+        private static void DisplayMigrationOptions(List<MigrationOption> options)
         {
             Console.WriteLine("\n=== Migration Options ===");
             Console.WriteLine("Select which Xenia version(s) to migrate:");
             Console.WriteLine();
 
-            int optionNumber = 1;
-            var availableOptions = new List<MigrationOption>();
-
-            // Individual emulator options
-            if (HasValidEmulatorPath(oldConfig.XeniaCanary))
-            {
-                availableOptions.Add(new MigrationOption(optionNumber++, "Xenia Canary", "canary", oldConfig.XeniaCanary));
-            }
-
-            if (HasValidEmulatorPath(oldConfig.XeniaMousehook))
-            {
-                availableOptions.Add(new MigrationOption(optionNumber++, "Xenia Mousehook", "mousehook", oldConfig.XeniaMousehook));
-            }
-
-            if (HasValidEmulatorPath(oldConfig.XeniaNetplay))
-            {
-                availableOptions.Add(new MigrationOption(optionNumber++, "Xenia Netplay", "netplay", oldConfig.XeniaNetplay));
-            }
-
-            // Migrate all option
-            if (availableOptions.Count > 1)
-            {
-                availableOptions.Add(new MigrationOption(optionNumber++, "Migrate All", "all", null));
-            }
-
-            // Display options
-            foreach (var option in availableOptions)
+            foreach (var option in options)
             {
                 Console.WriteLine($"{option.Number}. {option.DisplayName}");
                 if (option.EmulatorInfo != null)
@@ -173,95 +206,90 @@ class Program
                 }
             }
 
-            Console.WriteLine($"{optionNumber}. Exit");
+            Console.WriteLine($"{options.Count + 1}. {EXIT_OPTION_TEXT}");
             Console.WriteLine();
-            Console.Write("Enter your choice: ");
+        }
 
-            if (int.TryParse(Console.ReadLine(), out int choice))
+        private static int GetUserChoice(int maxChoice)
+        {
+            while (true)
             {
-                if (choice == optionNumber) // Exit option
+                Console.Write("Enter your choice: ");
+                if (int.TryParse(Console.ReadLine(), out int choice) && choice >= 1 && choice <= maxChoice)
                 {
-                    Console.WriteLine("Exiting...");
-                    break;
+                    return choice;
                 }
+                Console.WriteLine("Invalid input. Please enter a valid number.");
+            }
+        }
 
-                var selectedOption = availableOptions.FirstOrDefault(o => o.Number == choice);
-                if (selectedOption != null)
+        private static void ProcessMigrationChoice(MigrationOption selectedOption, List<MigrationOption> availableOptions, string oldPath, string newPath)
+        {
+            if (selectedOption.Type == MIGRATION_ALL_TYPE)
+            {
+                var emulatorsToMigrate = availableOptions.Where(o => o.Type != MIGRATION_ALL_TYPE).ToList();
+                MigrateAllEmulators(emulatorsToMigrate, oldPath, newPath);
+            }
+            else
+            {
+                MigrateSingleEmulator(selectedOption, oldPath, newPath);
+            }
+        }
+
+        private static bool HasValidEmulatorPath(EmulatorInfo emulatorInfo) =>
+            !string.IsNullOrEmpty(emulatorInfo.EmulatorLocation) && (Directory.Exists(emulatorInfo.EmulatorLocation) || File.Exists(emulatorInfo.EmulatorLocation));
+
+        private static bool HasAnyEmulatorToMigrate(OldManagerConfig oldConfig) =>
+            HasValidEmulatorPath(oldConfig.XeniaCanary) || HasValidEmulatorPath(oldConfig.XeniaMousehook) || HasValidEmulatorPath(oldConfig.XeniaNetplay);
+
+        private static void MigrateSingleEmulator(MigrationOption option, string oldBasePath, string newBasePath)
+        {
+            Console.WriteLine($"\n=== Migrating {option.DisplayName} ===");
+
+            try
+            {
+                var sourcePath = GetEmulatorDirectory(option.EmulatorInfo.EmulatorLocation);
+                var targetPath = Path.Combine(newBasePath, EMULATORS_FOLDER, option.DisplayName, CONTENT_FOLDER);
+
+                if (ConfirmMigration(option.DisplayName, sourcePath, targetPath))
                 {
-                    if (selectedOption.Type == "all")
-                    {
-                        MigrateAllEmulators(availableOptions.Where(o => o.Type != "all").ToList(), oldPath, newPath);
-                    }
-                    else
-                    {
-                        MigrateSingleEmulator(selectedOption, oldPath, newPath);
-                    }
+                    CopyDirectory(sourcePath, targetPath);
+                    Console.WriteLine($"✓ {option.DisplayName} migrated successfully!");
                 }
                 else
                 {
-                    Console.WriteLine("Invalid choice. Please try again.");
+                    Console.WriteLine($"Migration of {option.DisplayName} cancelled.");
                 }
             }
-            else
+            catch (Exception ex)
             {
-                Console.WriteLine("Invalid input. Please enter a number.");
+                Console.WriteLine($"✗ Failed to migrate {option.DisplayName}: {ex.Message}");
             }
         }
-    }
 
-    private static bool HasValidEmulatorPath(EmulatorInfo emulatorInfo)
-    {
-        return !string.IsNullOrEmpty(emulatorInfo.EmulatorLocation) &&
-               (Directory.Exists(emulatorInfo.EmulatorLocation) || File.Exists(emulatorInfo.EmulatorLocation));
-    }
-
-    private static bool HasAnyEmulatorToMigrate(OldManagerConfig oldConfig)
-    {
-        return HasValidEmulatorPath(oldConfig.XeniaCanary) ||
-               HasValidEmulatorPath(oldConfig.XeniaMousehook) ||
-               HasValidEmulatorPath(oldConfig.XeniaNetplay);
-    }
-
-    private static void MigrateSingleEmulator(MigrationOption option, string oldBasePath, string newBasePath)
-    {
-        Console.WriteLine($"\n=== Migrating {option.DisplayName} ===");
-
-        try
+        private static void MigrateAllEmulators(List<MigrationOption> options, string oldBasePath, string newBasePath)
         {
-            var sourcePath = GetEmulatorDirectory(option.EmulatorInfo.EmulatorLocation);
-            var targetPath = Path.Combine(newBasePath, "Emulators", option.DisplayName, "content");
+            Console.WriteLine($"\n=== Migrating All Emulators ===");
+            Console.WriteLine($"This will migrate {options.Count} emulator(s):");
 
-            if (ConfirmMigration(option.DisplayName, sourcePath, targetPath))
+            foreach (var option in options)
             {
-                CopyDirectory(sourcePath, targetPath);
-                Console.WriteLine($"✓ {option.DisplayName} migrated successfully!");
+                Console.WriteLine($"  • {option.DisplayName}");
             }
-            else
+
+            if (!GetUserConfirmation("Proceed with migration"))
             {
-                Console.WriteLine($"Migration of {option.DisplayName} cancelled.");
+                Console.WriteLine("Migration cancelled.");
+                return;
             }
-        }
-        catch (Exception ex)
-        {
-            Console.WriteLine($"✗ Failed to migrate {option.DisplayName}: {ex.Message}");
-        }
-    }
 
-    private static void MigrateAllEmulators(List<MigrationOption> options, string oldBasePath, string newBasePath)
-    {
-        Console.WriteLine($"\n=== Migrating All Emulators ===");
-        Console.WriteLine($"This will migrate {options.Count} emulator(s):");
-
-        foreach (var option in options)
-        {
-            Console.WriteLine($"  • {option.DisplayName}");
+            var (successful, failed) = PerformBatchMigration(options, oldBasePath, newBasePath);
+            DisplayMigrationSummary(successful, failed);
         }
 
-        Console.Write("\nProceed with migration? (y/n): ");
-        if (Console.ReadLine()?.ToLower() == "y")
+        private static (int successful, int failed) PerformBatchMigration(List<MigrationOption> options, string oldBasePath, string newBasePath)
         {
-            int successful = 0;
-            int failed = 0;
+            int successful = 0, failed = 0;
 
             foreach (var option in options)
             {
@@ -269,7 +297,7 @@ class Program
                 {
                     Console.WriteLine($"\nMigrating {option.DisplayName}...");
                     var sourcePath = GetEmulatorDirectory(option.EmulatorInfo.EmulatorLocation);
-                    var targetPath = Path.Combine(newBasePath, "Emulators", option.DisplayName, "content");
+                    var targetPath = Path.Combine(newBasePath, EMULATORS_FOLDER, option.DisplayName, CONTENT_FOLDER);
 
                     CopyDirectory(sourcePath, targetPath);
                     Console.WriteLine($"✓ {option.DisplayName} completed");
@@ -282,71 +310,72 @@ class Program
                 }
             }
 
+            return (successful, failed);
+        }
+
+        private static void DisplayMigrationSummary(int successful, int failed)
+        {
             Console.WriteLine($"\n=== Migration Summary ===");
             Console.WriteLine($"Successful: {successful}");
             Console.WriteLine($"Failed: {failed}");
             Console.WriteLine($"Total: {successful + failed}");
         }
-        else
-        {
-            Console.WriteLine("Migration cancelled.");
-        }
-    }
 
-    private static bool ConfirmMigration(string emulatorName, string sourcePath, string targetPath)
-    {
-        Console.WriteLine($"Source: {sourcePath}");
-        Console.WriteLine($"Target: {targetPath}");
-
-        if (Directory.Exists(targetPath))
+        private static bool GetUserConfirmation(string prompt)
         {
-            Console.WriteLine("⚠️  Target directory already exists. Contents will be overwritten.");
+            Console.Write($"{prompt}? (y/n): ");
+            return Console.ReadLine()?.ToLower() == "y";
         }
 
-        Console.Write($"Migrate {emulatorName}? (y/n): ");
-        return Console.ReadLine()?.ToLower() == "y";
-    }
-
-    private static string GetEmulatorDirectory(string emulatorPath)
-    {
-        // If it's a file, return the directory containing it
-        if (File.Exists(emulatorPath))
+        private static bool ConfirmMigration(string emulatorName, string sourcePath, string targetPath)
         {
-            return Path.GetDirectoryName(emulatorPath);
+            Console.WriteLine($"Source: {sourcePath}");
+            Console.WriteLine($"Target: {targetPath}");
+
+            if (Directory.Exists(targetPath))
+            {
+                Console.WriteLine("⚠️  Target directory already exists. Contents will be overwritten.");
+            }
+
+            return GetUserConfirmation($"Migrate {emulatorName}");
         }
 
-        // If it's already a directory, return it
-        if (Directory.Exists(emulatorPath))
+        private static string GetEmulatorDirectory(string emulatorPath)
         {
-            return emulatorPath;
+            if (File.Exists(emulatorPath))
+            {
+                return Path.GetDirectoryName(emulatorPath);
+            }
+
+            if (Directory.Exists(emulatorPath))
+            {
+                return emulatorPath;
+            }
+
+            throw new DirectoryNotFoundException($"Emulator path not found: {emulatorPath}");
         }
 
-        throw new DirectoryNotFoundException($"Emulator path not found: {emulatorPath}");
-    }
-
-    private static void CopyDirectory(string sourceDir, string targetDir)
-    {
-        if (!Directory.Exists(sourceDir))
+        private static void CopyDirectory(string sourceDir, string targetDir)
         {
-            throw new DirectoryNotFoundException($"Source directory not found: {sourceDir}");
+            if (!Directory.Exists(sourceDir))
+            {
+                throw new DirectoryNotFoundException($"Source directory not found: {sourceDir}");
+            }
+
+            Directory.CreateDirectory(targetDir);
+
+            var files = Directory.GetFiles(sourceDir, "*", SearchOption.AllDirectories);
+
+            foreach (string file in files)
+            {
+                string relativePath = Path.GetRelativePath(sourceDir, file);
+                string targetFile = Path.Combine(targetDir, relativePath);
+
+                Directory.CreateDirectory(Path.GetDirectoryName(targetFile));
+                File.Copy(file, targetFile, true);
+            }
+
+            Console.WriteLine($"Copied {files.Length} files");
         }
-
-        // Create target directory if it doesn't exist
-        Directory.CreateDirectory(targetDir);
-
-        // Copy all files
-        foreach (string file in Directory.GetFiles(sourceDir, "*", SearchOption.AllDirectories))
-        {
-            string relativePath = Path.GetRelativePath(sourceDir, file);
-            string targetFile = Path.Combine(targetDir, relativePath);
-
-            // Create subdirectory if needed
-            Directory.CreateDirectory(Path.GetDirectoryName(targetFile));
-
-            // Copy file
-            File.Copy(file, targetFile, true);
-        }
-
-        Console.WriteLine($"Copied {Directory.GetFiles(sourceDir, "*", SearchOption.AllDirectories).Length} files");
     }
 }
