@@ -40,6 +40,12 @@ jobs:
           $exe = Get-ChildItem -Path .\publish\*.exe | Select-Object -First 1
           Compress-Archive -Path $exe.FullName -DestinationPath .\migration-tool.zip
 
+      - name: Upload artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: migration-tool
+          path: ./migration-tool.zip
+
       - name: Create new release
         id: create_release
         uses: actions/create-release@v1
