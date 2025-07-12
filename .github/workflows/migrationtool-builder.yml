@@ -1,6 +1,9 @@
 name: Migration Tool (Build and draft release)
 
 on:
+  push:
+    branches:
+      - main
   workflow_dispatch:
 
 jobs:
