@@ -140,9 +140,20 @@ namespace MigrationTool
                 return;
             }
 
+            // Check if there are any emulators that can be migrated (exist in old but not in new)
+            var availableOptions = GetAvailableMigrationOptions(configData.OldConfig, configData.NewConfig);
+            if (availableOptions.Count == 0)
+            {
+                Console.WriteLine("\n⚠️  All emulators from old configuration are already configured in the new configuration.");
+                Console.WriteLine("No migration needed.");
+                Console.WriteLine("Press any key to exit...");
+                Console.ReadKey();
+                return;
+            }
+
             while (true)
             {
-                var availableOptions = GetAvailableMigrationOptions(configData.OldConfig);
+                availableOptions = GetAvailableMigrationOptions(configData.OldConfig, configData.NewConfig);
                 DisplayMigrationOptions(availableOptions);
 
                 var choice = GetUserChoice(availableOptions.Count + 1);
@@ -163,22 +174,23 @@ namespace MigrationTool
             }
         }
 
-        private static List<MigrationOption> GetAvailableMigrationOptions(OldManagerConfig oldConfig)
+        private static List<MigrationOption> GetAvailableMigrationOptions(OldManagerConfig oldConfig, NewManagerConfig newConfig)
         {
             var options = new List<MigrationOption>();
             int optionNumber = 1;
 
-            if (HasValidEmulatorPath(oldConfig.XeniaCanary))
+            // Only add migration option if emulator exists in old config AND is not already configured in new config
+            if (HasValidEmulatorPath(oldConfig.XeniaCanary) && HasValidEmulatorPath(newConfig.XeniaCanary))
             {
                 options.Add(new MigrationOption(optionNumber++, "Xenia Canary", "canary", oldConfig.XeniaCanary));
             }
 
-            if (HasValidEmulatorPath(oldConfig.XeniaMousehook))
+            if (HasValidEmulatorPath(oldConfig.XeniaMousehook) && HasValidEmulatorPath(newConfig.XeniaMousehook))
             {
                 options.Add(new MigrationOption(optionNumber++, "Xenia Mousehook", "mousehook", oldConfig.XeniaMousehook));
             }
 
-            if (HasValidEmulatorPath(oldConfig.XeniaNetplay))
+            if (HasValidEmulatorPath(oldConfig.XeniaNetplay) && HasValidEmulatorPath(newConfig.XeniaNetplay))
             {
                 options.Add(new MigrationOption(optionNumber++, "Xenia Netplay", "netplay", oldConfig.XeniaNetplay));
             }
